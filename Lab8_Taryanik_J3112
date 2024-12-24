@@ -1,0 +1,398 @@
+#include <iostream>
+#include <stack>
+#include <queue>
+#include <cstdlib> 
+#include <string>
+#include <algorithm>
+#include <unordered_map>
+#include <cmath>
+#include <locale>
+#include <locale.h>
+
+#include <fstream>
+//#include <boost/multiprecision/cpp_dec_float.hpp>
+//#include <boost/multiprecision/cpp_dec_float.hpp>
+//#include <D:\labs_c++\lab-8\vcpkg\vcpkg_installed\x64-windows\include\boost\multiprecision\cpp_dec_float.hpp>
+#include <sstream>
+#include <iomanip>
+#include <vector>
+#include <utility> // Для std::pair
+#include <functional> // Для std::hash
+#define double long double
+
+// Определяем хэш-функцию для std::pair<int, int>
+
+//#define double float
+using namespace std;
+struct pair_hash {
+    template <class T1, class T2>
+    std::size_t operator () (const std::pair<T1, T2>& pair) const {
+        auto hash1 = std::hash<T1>{}(pair.first);   // Хэшируем первый элемент
+        auto hash2 = std::hash<T2>{}(pair.second);  // Хэшируем второй элемент
+        return hash1 ^ hash2;                       // Комбинируем хэши
+    }
+};
+struct Node
+{
+    int id = 0;
+    double lon, lat;
+    int color = 0;
+    Node() = default;
+    Node(double lon, double lat)
+    {
+        this->lon = lon;
+        this->lat = lat;
+    }
+    vector<pair<Node*, double>> neighbors;
+};
+struct Graph
+{
+    int id = 0;
+    vector<Node*> nodes;
+    unordered_map<pair<int, int>, int, pair_hash> nodes_existing;
+    void parse_node(stringstream &ss)
+    {
+        string s;
+        getline(ss, s, ',');
+        double lon1 = stod(s);
+        getline(ss, s, ':');
+        double lat1 = stod(s);
+        Node* node = get_node(lon1, lat1);
+        while (true)
+        {
+            try
+            {
+            getline(ss, s, ',');
+            double lon = stod(s);
+            getline(ss, s, ',');
+            double lat = stod(s);
+            Node* neighboor = get_node(lon, lat);
+            getline(ss, s, ';');
+            double weigth = stod(s);
+            node->neighbors.push_back(make_pair(neighboor, weigth));
+            cout << lat << ' ' << node->neighbors.back().first->lat << ' ' << node->neighbors.back().second << '\n';
+            }
+            catch(const invalid_argument& e)
+            {
+                return;
+            }
+        }
+    }
+    void add_node(double& lon, double& lat)
+    {
+        Node* newNode = new Node(lon, lat);
+        newNode->id = id;
+        id++;
+        nodes.push_back(newNode);
+    }
+    Node* get_node(double& lon, double& lat)
+    {
+        if(nodes_existing.count(make_pair(lon, lat)) != 0)
+        {
+            return nodes[nodes_existing[make_pair(lon, lat)]];
+        }
+        add_node(lon, lat);
+        nodes_existing[make_pair(lon, lat)] = nodes.back()->id;
+        return nodes.back();
+      /**  for (Node* node : nodes)
+        {
+            if (node->lat == lat && node->lon == lon)
+            {
+                return node;
+            }
+        }
+        add_node(lon, lat);
+        return nodes.back();*/
+    }
+    Node* get_closest_node(double &lon, double &lat)
+    {
+        double distance = 1e9;
+        Node* ans = nodes.back();
+        for (Node* node : nodes)
+        {
+            double current_distance = pow((node->lat - lat, 2), 2) + pow((node->lon - lon), 2);
+            if (current_distance < distance)
+            {
+                ans = node;
+                distance = current_distance;
+            }
+        }
+        return ans;
+    }
+
+    void resetColours()
+    {
+        for (Node* node : this->nodes)
+        {
+            node->color = 0;
+        }
+    }
+    double bfs(double lon1, double lat1, double lon2, double lat2)
+    { // пока что дефолтный bfs
+        resetColours();
+        Node* start = get_closest_node(lon1, lat1);
+        Node* end = get_closest_node(lon2, lat2);
+        unordered_map<int, double> distances;
+        distances[start->id] = 0;
+        queue<Node*> nodes;
+        nodes.push(start);
+        while (!nodes.empty())
+        {
+            Node* node = nodes.front();
+            nodes.pop();
+            node->color = 1;
+            for (auto neighboor : node->neighbors)
+            {
+                if (neighboor.first->color == 0)
+                {
+                    distances[neighboor.first->id] = distances[node->id] + neighboor.second;
+                    nodes.push(neighboor.first);
+                }
+                if (neighboor.first->id == end->id)
+                {
+                    return distances[end->id];
+                }
+            }
+
+
+        }
+        return -1; // не существует пути
+    }
+    double dfs(double lon1, double lat1, double lon2, double lat2)
+    {
+        resetColours();
+        Node* start = get_closest_node(lon1, lat1);
+        Node* end = get_closest_node(lon2, lat2);
+        stack<Node*> nodes;
+        unordered_map<int, double> distances;
+        distances[start->id] = 0;
+        nodes.push(start);
+        while (!nodes.empty())
+        {
+            Node* node = nodes.top();
+            nodes.pop();
+            node->color = 1;
+            for (auto neighboor : node->neighbors)
+            {
+                if (neighboor.first->color == 0)
+                {
+                    distances[neighboor.first->id] = distances[node->id] + neighboor.second;
+                    nodes.push(neighboor.first);
+                }
+                if (neighboor.first->id == end->id)
+                {
+                    return distances[end->id];
+                }
+            }
+
+        }
+        return -1; // не существует пути
+    }
+    vector<int> dijkstra(double lon1, double lat1, double lon2, double lat2)
+    {
+        //resetColours();
+        Node* start = get_closest_node(lon1, lat1);
+        Node* end = get_closest_node(lon2, lat2);
+        unordered_map<double, double> distances;  // Хранилище для минимальных расстояний
+        unordered_map<int, int> came_from;
+        for (Node* node : nodes) distances[node->id] = node->id == start->id ? 0 : -1;
+
+        unordered_map<double, double> previous;  // Хранилище для предыдущих узлов на пути
+        priority_queue<pair<Node*, double>> pq; // Очередь минимальных расстояний приоритетов
+        pq.push(make_pair(start, 0));
+        while (!pq.empty()) {
+            pair<Node*, int> current = pq.top(); pq.pop();
+
+
+           /* if (current.first == end)
+            {
+                return distances[current.first->id];
+            } // Если достигли конца
+            */
+            for (pair<Node*, int> neighbor : current.first->neighbors) {
+                int newDistance = distances[current.first->id] + neighbor.second;
+
+                int neigborDistance = distances[neighbor.first->id];
+                if (neigborDistance == -1 || newDistance < neigborDistance) {
+                    distances[neighbor.first->id] = newDistance;
+                    came_from[neighbor.first->id] = current.first->id;
+                    pq.push(make_pair(neighbor.first, neighbor.second)); 
+                }
+            }
+        }
+        vector<int> ans = {};
+        int i = end->id;
+        while (i != start->id)
+        {
+            ans.push_back(i);
+            i = came_from[i];
+        }
+        if(i == start->id)
+        {
+            ans.push_back(i);
+        }
+        reverse(ans.begin(), ans.end());
+        for(int i = 0; i < ans.size(); i++)
+        {
+            cout << ans[i] << ' ';
+        }
+        return ans;
+    }
+    vector<int> A_star(double lon1, double lat1, double lon2, double lat2)
+    {
+        //resetColours();
+        Node* start = get_closest_node(lon1, lat1);
+        Node* end = get_closest_node(lon2, lat2);
+        unordered_map<double, double> distances;  // Хранилище для минимальных расстояний
+        unordered_map<int, int> came_from;
+        for (Node* node : nodes) distances[node->id] = node->id == start->id ? 0 : -1;
+
+        unordered_map<double, double> previous;  // Хранилище для предыдущих узлов на пути
+        priority_queue<pair<Node*, double>> pq; // Очередь минимальных расстояний приоритетов
+        pq.push(make_pair(start, 0));
+        while (!pq.empty()) {
+            pair<Node*, int> current = pq.top(); pq.pop();
+
+
+            /* if (current.first == end)
+             {
+                 return distances[current.first->id];
+             } // Если достигли конца
+             */
+            for (pair<Node*, int> neighbor : current.first->neighbors) {
+                double heuristics = abs(current.first->lon - neighbor.first->lon) + abs(current.first->lat - neighbor.first->lat);
+                int newDistance = distances[current.first->id] + neighbor.second + heuristics;
+
+                int neigborDistance = distances[neighbor.first->id];
+                if (neigborDistance == -1 || newDistance < neigborDistance) {
+                    distances[neighbor.first->id] = newDistance;
+                    came_from[neighbor.first->id] = current.first->id;
+                    pq.push(make_pair(neighbor.first, neighbor.second));
+                }
+            }
+        }
+        vector<int> ans = {};
+        int i = end->id;
+        while (i != start->id)
+        {
+            ans.push_back(i);
+            i = came_from[i];
+        }
+        if (i == start->id)
+        {
+            ans.push_back(i);
+        }
+        reverse(ans.begin(), ans.end());
+        for (int i = 0; i < ans.size(); i++)
+        {
+            cout << ans[i] << ' ';
+        }
+        return ans;
+    }
+};
+
+
+int main()
+{
+    setlocale(LC_ALL, "rus");
+    setlocale(LC_ALL, "C");
+    setlocale(LC_NUMERIC, "C"); // Устанавливаем локаль для чисел
+    //std::locale::global(std::locale("en_US.UTF-8"));
+    // решить проблему точности, иначе хавает петли
+    //string s = "30.4141326,59.9470649:30.4140936,59.9469059,0.0001637131637985715;30.4143445,59.9470481,0.00021256496779227193;";
+    /*string s = "30,60:40,80,1;50,100,2;";
+    string s1 = "50,100:100,50,1;";
+    string s2 = "100,50:30,60,1;";*/
+    Graph g;
+    fstream fs;
+    fs.open("C:\\Users\\Huawei\\Desktop\\spb_graph.txt");
+    cout << fixed << setprecision(20);
+    string s = "";
+    int cnt = 0;
+    while (fs >> s)
+    {
+        stringstream ss(s);
+        g.parse_node(ss);
+        cnt++;
+        if(cnt % 1000 == 0)
+        {
+          //cout << cnt << endl;
+            break;
+        }
+    }
+    for(int i = 0; i < g.nodes.size(); i++)
+    {
+        cout << g.nodes[i]->lon << ' ' << g.nodes[i]->lat << '\n';        
+    }
+    cout << "CONGRATS PARSE \n";
+    cout << g.nodes.size() << '\n';
+    fs.close();
+    while (true)
+    {
+        string action;
+        cout << "Введите 1), чтобы найти ближайшую вершину\n";
+        cout << "Введите 2), чтобы найти путь с помощью dfs\n";
+        cout << "Введите 3), чтобы найти путь с помощью bfs\n";
+        cout << "Введите 4), чтобы найти путь с помощью Дейкстры\n";
+        cout << "Введите 5), чтобы найти путь с помощью A*\n";
+        cin >> action;
+        if(action == "1")
+        {
+            cout << "Введите широту и долготу: ";
+            double lon, lat;
+            cin >> lon >> lat;
+            Node* closest = g.get_closest_node(lon, lat);
+            cout << "Итоговая широта и долгота: ";
+            cout << closest->lat << ' ' << closest->lon << '\n';
+        }
+        if (action == "2")
+        {
+            cout << "Введите широту и долготу для стартовой вершины поиска dfs: ";
+            double lon1, lat1;
+            cin >> lon1 >> lat1;
+            cout << "Введите широту и долготу для конечной вершины: ";
+            double lon2, lat2;
+            cin >> lon2 >> lat2;
+            cout << "Расстояние: ";
+            cout << g.dfs(lon1, lat1, lon2, lat2) << endl;
+        }
+        if (action == "3")
+        {
+            cout << "Введите широту и долготу для стартовой вершины поиска bfs: ";
+            double lon1, lat1;
+            cin >> lon1 >> lat1;
+            cout << "Введите широту и долготу для конечной вершины: ";
+            double lon2, lat2;
+            cin >> lon2 >> lat2;
+            cout << "Расстояние: ";
+            cout << g.bfs(lon1, lat1, lon2, lat2) << endl;
+        }
+        if (action == "4")
+        {
+            cout << "Введите широту и долготу для стартовой вершины поиска Дейкстры: ";
+            double lon1, lat1;
+            cin >> lon1 >> lat1;
+            cout << "Введите широту и долготу для конечной вершины: ";
+            double lon2, lat2;
+            cin >> lon2 >> lat2;
+            cout << "Расстояние: ";
+            g.dijkstra(lon1, lat1, lon2, lat2);
+            cout << endl;
+        }
+        if (action == "5")
+        {
+            cout << "Введите широту и долготу для стартовой вершины поиска A*: ";
+            double lon1, lat1;
+            cin >> lon1 >> lat1;
+
+            cout << "Введите широту и долготу для конечной вершины: ";
+            double lon2, lat2;
+            cin >> lon2 >> lat2;
+            cout << "Расстояние: ";
+            g.A_star(lon1, lat1, lon2, lat2);
+            cout << endl;
+        }
+    }
+    //30.288133 59.924775
+    //30.297411 59.917276
+}
