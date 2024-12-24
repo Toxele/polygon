@@ -1,0 +1,60 @@
+#include <iostream>
+#include <algorithm>
+#include <vector>
+
+class Solution {
+public:
+    
+    int bin_search(vector<int> &nums, int el)
+    {
+        int l = 0;
+        int r = nums.size() - 1;
+        while(l <= r)
+        {
+            int m = l + (r - l) / 2;
+
+            if (nums[m] == el) {
+                return m;
+            }
+            else if (nums[m] < el) {
+                l = m + 1;
+            }
+            else {
+                r = m - 1;
+            }
+        }
+        return -1;  
+    }
+    int maxSum(vector<int>& nums1, vector<int>& nums2) {
+        long long best_sum = 0;
+        long long sum1 = 0;
+        long long sum2 = 0;
+        int l1 = 0;
+        int l2 = 0;
+        while (l1 < nums1.size())
+        {
+            sum1 += nums1[l1];
+            int element = bin_search(nums2, nums1[l1]);
+            if(element != -1) 
+            {
+                while (l2 <= element)
+                {
+                    sum2 += nums2[l2];
+                    l2++;
+                }
+                best_sum = max(sum1, sum2);
+                sum1 = best_sum;
+                sum2 = best_sum;
+            }
+            l1++;
+        }
+        while (l2 < nums2.size())
+        {
+            sum2 += nums2[l2];
+            l2++;
+        }
+        long long proc = 1e9 + 7;
+        best_sum = max(sum1, sum2);
+        return best_sum % proc; 
+    }
+};
