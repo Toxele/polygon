@@ -8,48 +8,85 @@
 #include <cmath>
 #include <locale>
 #include <locale.h>
-
+#include <ctime>
+#include <mutex>
+#include <unordered_set>
 #include <fstream>
-//#include <boost/multiprecision/cpp_dec_float.hpp>
-//#include <boost/multiprecision/cpp_dec_float.hpp>
-//#include <D:\labs_c++\lab-8\vcpkg\vcpkg_installed\x64-windows\include\boost\multiprecision\cpp_dec_float.hpp>
 #include <sstream>
 #include <iomanip>
 #include <vector>
-#include <utility> // Для std::pair
-#include <functional> // Для std::hash
+#include <utility>
+#include <limits>
+#include <functional>
+// для повышения точности и, чтобы не писать каждый раз long double, заменил double на long double
 #define double long double
-
-// Определяем хэш-функцию для std::pair<int, int>
-
-//#define double float
+// забавный факт, у endl под капотом ещё несколько операций, поэтому оно выполняется дольше '\n'
+#define endl '\n'
 using namespace std;
+// Для Дейкстры и A*, чтобы инициализировать вершины
+const double INF = numeric_limits<double>::infinity();
+// Взял готовую реализацию хэша для того, чтобы ускорить чтение графа
+// Хэш нужен, чтобы была возможность хранить в unordered_map пары как ключи для быстрого обращения к элементам
+// за счёт этого граф считывается за 1-2 минуты
 struct pair_hash {
     template <class T1, class T2>
     std::size_t operator () (const std::pair<T1, T2>& pair) const {
-        auto hash1 = std::hash<T1>{}(pair.first);   // Хэшируем первый элемент
-        auto hash2 = std::hash<T2>{}(pair.second);  // Хэшируем второй элемент
-        return hash1 ^ hash2;                       // Комбинируем хэши
+        auto hash1 = std::hash<T1>{}(pair.first);
+        auto hash2 = std::hash<T2>{}(pair.second);  
+        return hash1 ^ hash2;                       
     }
 };
+
+// Написал сразу 2 эвристики:
+// 1. Евклидова эвристика
+// 2. Манхэттэнская - взята за основу
+// работают примерно одинаково
+
+// Евклидова эвристика
+double euclideanDistance(double lon1, double lat1, double lon2, double lat2) {
+    return sqrt(pow(lon2 - lon1, 2) + pow(lat2 - lat1, 2)); // память O(1), сложность O(1)
+}
+// Манхэттэнская эвристика
+double manhattan(double lon1, double lat1, double lon2, double lat2)
+{
+    return abs(lon1 - lon2) + abs(lat1 - lat2); // память O(1), сложность O(1)
+}
 struct Node
 {
     int id = 0;
     double lon, lat;
+    // color: ставим цвет 1 или 2, во время работы BFS/DFS, аналог vector<int> visited
     int color = 0;
     Node() = default;
-    Node(double lon, double lat)
+    Node(double lon, double lat) 
     {
-        this->lon = lon;
+        this->lon = lon; 
         this->lat = lat;
-    }
+    } // память O(1), сложность O(1)
     vector<pair<Node*, double>> neighbors;
+};
+// Я долго искал ошибку в коде, оказывается в моей реализации greater<...> некорректно сортирует
+// элементы в очереди приоритетов, поэтому я написал свой компаратор
+struct CompareByDistance {
+    bool operator()(const pair<Node*, double>& a, const pair<Node*, double>& b) {
+        return a.second > b.second; // Сравниваем только по значению double
+    } // память O(1), сложность O(1)
 };
 struct Graph
 {
     int id = 0;
     vector<Node*> nodes;
-    unordered_map<pair<int, int>, int, pair_hash> nodes_existing;
+    /* 
+        Для того, чтобы программа не работала слишком долго из-за постоянного выделения памяти,
+        я вынес большую часть вспомогательных структур в поля структур графа и вершин.
+        В итоге алгоритмы работают не минуту, а меньше одной секунды
+    */
+
+    // node_existing хранит id ребёр по заданной широте и долготе
+    unordered_map<pair<double, double>, int, pair_hash> nodes_existing; // памяь O(V)
+    unordered_map<int, double> distances;  // хранилище для минимальных расстояний, память O(V)
+    unordered_map<int, int> came_from; // хранит путь при работе Дейкстры и A*, память O(V)
+    // parse_node считывает вершины в формате, который указан в таблице с заданием
     void parse_node(stringstream &ss)
     {
         string s;
@@ -70,21 +107,22 @@ struct Graph
             getline(ss, s, ';');
             double weigth = stod(s);
             node->neighbors.push_back(make_pair(neighboor, weigth));
-            cout << lat << ' ' << node->neighbors.back().first->lat << ' ' << node->neighbors.back().second << '\n';
-            }
+            } // если прочитали всю строку, то выходим из функции
             catch(const invalid_argument& e)
             {
                 return;
             }
         }
-    }
+    } // Сложность O(V + E) - считываем каждую вершину и её соседей
     void add_node(double& lon, double& lat)
     {
         Node* newNode = new Node(lon, lat);
         newNode->id = id;
         id++;
         nodes.push_back(newNode);
-    }
+    } // память O(1), сложность O(1)
+
+    // get_node ищет конкретную вершину, если такой не существует, то создаёт её
     Node* get_node(double& lon, double& lat)
     {
         if(nodes_existing.count(make_pair(lon, lat)) != 0)
@@ -94,16 +132,9 @@ struct Graph
         add_node(lon, lat);
         nodes_existing[make_pair(lon, lat)] = nodes.back()->id;
         return nodes.back();
-      /**  for (Node* node : nodes)
-        {
-            if (node->lat == lat && node->lon == lon)
-            {
-                return node;
-            }
-        }
-        add_node(lon, lat);
-        return nodes.back();*/
-    }
+    } // память O(1), сложность O(1)
+
+    // get_closest_node ищет ближайшую вершину по заданным широте и долготе
     Node* get_closest_node(double &lon, double &lat)
     {
         double distance = 1e9;
@@ -118,108 +149,102 @@ struct Graph
             }
         }
         return ans;
-    }
+    } // память O(1), сложность O(V) - пробегаем по всему графу
 
+    // resetColours - "очистка" цветов для алгоритмов BFS и DFS
     void resetColours()
     {
         for (Node* node : this->nodes)
         {
             node->color = 0;
         }
-    }
+    } // память O(1), сложность O(V)
+    
+    /*
+        BFS и DFS
+        чтобы было интереснее, вывожу количество дорог, которое обойдёт алгоритм
+        и случайное найденное расстояние, для этого завёл переменную unordered_map<int, double> distances
+    */
     double bfs(double lon1, double lat1, double lon2, double lat2)
-    { // пока что дефолтный bfs
+    {
         resetColours();
         Node* start = get_closest_node(lon1, lat1);
         Node* end = get_closest_node(lon2, lat2);
-        unordered_map<int, double> distances;
-        distances[start->id] = 0;
-        queue<Node*> nodes;
-        nodes.push(start);
-        while (!nodes.empty())
+        for (Node* node : nodes) distances[node->id] = node->id == start->id ? 0 : INF;
+        queue<Node*> search_nodes;
+        search_nodes.push(start);
+        int cnt = 1;
+        while (!search_nodes.empty())
         {
-            Node* node = nodes.front();
-            nodes.pop();
+            Node* node = search_nodes.front();
+            search_nodes.pop();
             node->color = 1;
             for (auto neighboor : node->neighbors)
             {
                 if (neighboor.first->color == 0)
                 {
+                    neighboor.first->color = 1; // помечаю единичкой, чтобы алгоритм сюда больше не заходил
+                    cnt++;
                     distances[neighboor.first->id] = distances[node->id] + neighboor.second;
-                    nodes.push(neighboor.first);
-                }
-                if (neighboor.first->id == end->id)
-                {
-                    return distances[end->id];
+                    search_nodes.push(neighboor.first);
+                    if (neighboor.first->id == end->id)
+                    {
+                        cout << "Алгоритм прошёл дорог: " << cnt << '\n';
+                        cout << "Пройденное расстояние: ";
+                        return distances[end->id];
+                    }
                 }
             }
-
+            
 
         }
-        return -1; // не существует пути
+        cout << "Пути не существует, расстояние: ";
+        return -1;
     }
+    // BFS: O(3V + E) - проходимся по каждой вершине v за O(V) и каждому ребру e за O(E) + очистка цветов за O(V) + очистка расстояний за O(V)
+    // Пространственная: O(3V) - храню граф и unordered_map с расстояниями, + память на цвета у каждой вершины
     double dfs(double lon1, double lat1, double lon2, double lat2)
     {
         resetColours();
         Node* start = get_closest_node(lon1, lat1);
         Node* end = get_closest_node(lon2, lat2);
-        stack<Node*> nodes;
-        unordered_map<int, double> distances;
-        distances[start->id] = 0;
-        nodes.push(start);
-        while (!nodes.empty())
+        stack<Node*> search_nodes;
+        for (Node* node : nodes) distances[node->id] = node->id == start->id ? 0 : INF;
+        search_nodes.push(start);
+        int cnt = 1;
+        while (!search_nodes.empty())
         {
-            Node* node = nodes.top();
-            nodes.pop();
+            Node* node = search_nodes.top();
+            search_nodes.pop();
             node->color = 1;
             for (auto neighboor : node->neighbors)
             {
+                cnt++;
                 if (neighboor.first->color == 0)
                 {
+                    neighboor.first->color = 1;
                     distances[neighboor.first->id] = distances[node->id] + neighboor.second;
-                    nodes.push(neighboor.first);
+                    search_nodes.push(neighboor.first);
+                    if (neighboor.first->id == end->id)
+                    {
+                        cout << "Алгоритм прошёл дорог: " << cnt << '\n';
+                        cout << "Пройденное расстояние: ";
+                        return distances[end->id];
+                    }
                 }
-                if (neighboor.first->id == end->id)
-                {
-                    return distances[end->id];
-                }
+                
             }
 
         }
-        return -1; // не существует пути
-    }
-    vector<int> dijkstra(double lon1, double lat1, double lon2, double lat2)
+        cout << "Пути не существует, расстояние: ";
+        return -1;
+    } 
+    // DFS: O(3V + E) - проходимся по каждой вершине v за O(V) и каждому ребру e за O(E) + очистка цветов за O(V) + очистка расстояний за O(V)
+    // Пространственная: O(3V) - храню граф и unordered_map с расстояниями, + память на цвета у каждой вершины
+    
+    // passed_way - всопомогательная функция для Дейкстры и A*, восстанавливает пройденный путь
+    vector<int> passed_way(Node* end, Node* start, unordered_map<int, double> &distances, unordered_map<int, int> &came_from)
     {
-        //resetColours();
-        Node* start = get_closest_node(lon1, lat1);
-        Node* end = get_closest_node(lon2, lat2);
-        unordered_map<double, double> distances;  // Хранилище для минимальных расстояний
-        unordered_map<int, int> came_from;
-        for (Node* node : nodes) distances[node->id] = node->id == start->id ? 0 : -1;
-
-        unordered_map<double, double> previous;  // Хранилище для предыдущих узлов на пути
-        priority_queue<pair<Node*, double>> pq; // Очередь минимальных расстояний приоритетов
-        pq.push(make_pair(start, 0));
-        while (!pq.empty()) {
-            pair<Node*, int> current = pq.top(); pq.pop();
-
-
-           /* if (current.first == end)
-            {
-                return distances[current.first->id];
-            } // Если достигли конца
-            */
-            for (pair<Node*, int> neighbor : current.first->neighbors) {
-                int newDistance = distances[current.first->id] + neighbor.second;
-
-                int neigborDistance = distances[neighbor.first->id];
-                if (neigborDistance == -1 || newDistance < neigborDistance) {
-                    distances[neighbor.first->id] = newDistance;
-                    came_from[neighbor.first->id] = current.first->id;
-                    pq.push(make_pair(neighbor.first, neighbor.second)); 
-                }
-            }
-        }
         vector<int> ans = {};
         int i = end->id;
         while (i != start->id)
@@ -232,167 +257,331 @@ struct Graph
             ans.push_back(i);
         }
         reverse(ans.begin(), ans.end());
+        cout << "Расстояние: " << distances[end->id] << endl;
+        cout << "Пройденный путь: " << endl;
         for(int i = 0; i < ans.size(); i++)
         {
-            cout << ans[i] << ' ';
+            cout << ans[i] + 1 << ' ';
         }
         return ans;
-    }
-    vector<int> A_star(double lon1, double lat1, double lon2, double lat2)
+    } // сложность зависит от пути, память O(2V) в худшем случае - если обошли весь граф, то у нас заполнится distances и came_from
+    vector<int> dijkstra(double lon1, double lat1, double lon2, double lat2)
     {
-        //resetColours();
         Node* start = get_closest_node(lon1, lat1);
         Node* end = get_closest_node(lon2, lat2);
-        unordered_map<double, double> distances;  // Хранилище для минимальных расстояний
-        unordered_map<int, int> came_from;
-        for (Node* node : nodes) distances[node->id] = node->id == start->id ? 0 : -1;
-
-        unordered_map<double, double> previous;  // Хранилище для предыдущих узлов на пути
-        priority_queue<pair<Node*, double>> pq; // Очередь минимальных расстояний приоритетов
+        for (Node* node : nodes) distances[node->id] = node->id == start->id ? 0 : INF;
+        priority_queue<pair<Node*, double>, vector<pair<Node*, double>>, CompareByDistance> pq;
         pq.push(make_pair(start, 0));
+        bool path_exists = false;
         while (!pq.empty()) {
-            pair<Node*, int> current = pq.top(); pq.pop();
+            pair<Node*, double> current = pq.top();
+            pq.pop();
+            if(current.first->id == end->id)
+            {
+                while (!pq.empty())
+                {
+                    auto i = pq.top();
+                    pq.pop();
+                }
+                
+                path_exists = true;
+                break;
+            }
+            if (current.second > distances[current.first->id])
+            {
+                continue; // Если текущее расстояние больше, чем нашли, то пропускаем
+            }
+            for (pair<Node*, double> neighbor : current.first->neighbors) {
+                double newDistance = distances[current.first->id] + neighbor.second;
 
-
-            /* if (current.first == end)
-             {
-                 return distances[current.first->id];
-             } // Если достигли конца
-             */
-            for (pair<Node*, int> neighbor : current.first->neighbors) {
-                double heuristics = abs(current.first->lon - neighbor.first->lon) + abs(current.first->lat - neighbor.first->lat);
-                int newDistance = distances[current.first->id] + neighbor.second + heuristics;
-
-                int neigborDistance = distances[neighbor.first->id];
-                if (neigborDistance == -1 || newDistance < neigborDistance) {
+                double neighborDistance = distances[neighbor.first->id];
+                if (newDistance < neighborDistance) {
                     distances[neighbor.first->id] = newDistance;
                     came_from[neighbor.first->id] = current.first->id;
-                    pq.push(make_pair(neighbor.first, neighbor.second));
+                    pq.push(make_pair(neighbor.first, newDistance)); 
                 }
             }
         }
-        vector<int> ans = {};
-        int i = end->id;
-        while (i != start->id)
+        if(!path_exists)
         {
-            ans.push_back(i);
-            i = came_from[i];
+            cout << "Не существует такого пути \n";
+            return {};
         }
-        if (i == start->id)
+        return passed_way(end, start, distances, came_from);
+    } 
+      // Дейкстра:
+      // O((V+E) * logV) сложность (V + E) - обход всего графа, logV - время добавления вершины в очередь
+      // O(V + E) - пространственная сложность
+
+    vector<int> A_star(double lon1, double lat1, double lon2, double lat2)
+    {
+        Node* start = get_closest_node(lon1, lat1);
+        Node* end = get_closest_node(lon2, lat2);
+        for (Node* node : nodes) distances[node->id] = node->id == start->id ? 0 : INF;
+        vector<double> nodes_heuristics(nodes.size(), 0);
+        priority_queue<pair<Node*, double>, vector<pair<Node*, double>>, CompareByDistance> pq;
+        // Очередь минимальных расстояний приоритетов
+        pq.push(make_pair(start, 0));
+        bool path_exists = false;
+        while (!pq.empty()) {
+            pair<Node*, double> current = pq.top();
+            pq.pop();
+
+            if (current.first->id == end->id)
+            {
+                path_exists = true;
+                break;
+            } // Если достигли конца
+            if (current.second - nodes_heuristics[current.first->id] > distances[current.first->id])
+            {
+                continue; // Если текущее расстояние больше, пропускаем
+            }
+            for (pair<Node*, double> neighbor : current.first->neighbors) {
+
+                double heuristics = manhattan(current.first->lon, current.first->lat, neighbor.first->lon, neighbor.first->lat);
+                //double heuristics = euclideanDistance(current.first->lon, current.first->lat, neighbor.first->lon, neighbor.first->lat);
+                /* 
+                   Ради интереса написал две эвристики, но основной будет Манхэттэнская
+                */
+                
+                double newDistance = distances[current.first->id] + neighbor.second;// + heuristics;
+
+                double neighborDistance = distances[neighbor.first->id];
+                if (newDistance < neighborDistance) {
+                    distances[neighbor.first->id] = newDistance;
+                    came_from[neighbor.first->id] = current.first->id;
+                    nodes_heuristics[neighbor.first->id] = heuristics;
+                    pq.push(make_pair(neighbor.first, newDistance + heuristics)); 
+                }
+            }
+        }
+        if(!path_exists)
         {
-            ans.push_back(i);
+            cout << "Не существует такого пути \n";
+            return {};
         }
-        reverse(ans.begin(), ans.end());
-        for (int i = 0; i < ans.size(); i++)
-        {
-            cout << ans[i] << ' ';
-        }
-        return ans;
+        return passed_way(end, start, distances, came_from);
     }
+      // A_star аналогично:
+      // O((V+E) * logV) сложность (V + E) - обход всего графа, logV - время добавления вершины в очередь
+      // O(V + E) - пространственная сложность
+
 };
-
-
-int main()
+// write_graph - функция записи данных в граф
+void write_graph(Graph &g, fstream &file)
 {
-    setlocale(LC_ALL, "rus");
-    setlocale(LC_ALL, "C");
-    setlocale(LC_NUMERIC, "C"); // Устанавливаем локаль для чисел
-    //std::locale::global(std::locale("en_US.UTF-8"));
-    // решить проблему точности, иначе хавает петли
-    //string s = "30.4141326,59.9470649:30.4140936,59.9469059,0.0001637131637985715;30.4143445,59.9470481,0.00021256496779227193;";
-    /*string s = "30,60:40,80,1;50,100,2;";
-    string s1 = "50,100:100,50,1;";
-    string s2 = "100,50:30,60,1;";*/
-    Graph g;
-    fstream fs;
-    fs.open("C:\\Users\\Huawei\\Desktop\\spb_graph.txt");
-    cout << fixed << setprecision(20);
     string s = "";
     int cnt = 0;
-    while (fs >> s)
+    while (file >> s)
     {
         stringstream ss(s);
         g.parse_node(ss);
         cnt++;
         if(cnt % 1000 == 0)
-        {
-          //cout << cnt << endl;
-            break;
+        { 
+            cout << "Считано вершин: " << cnt << endl;
         }
     }
-    for(int i = 0; i < g.nodes.size(); i++)
+    cout << "Всего вершин в графе: " << g.nodes.size() << '\n';
+}
+// чтение вектора
+void read_vector(string s, vector<int> &vec)
+{
+    int el;
+    stringstream ss(s);
+    while (ss >> el)
     {
-        cout << g.nodes[i]->lon << ' ' << g.nodes[i]->lat << '\n';        
+        vec.push_back(el);
     }
-    cout << "CONGRATS PARSE \n";
-    cout << g.nodes.size() << '\n';
+}
+// Вспомогательная функция для сравнения векторов
+bool compare_vectors(vector<int> &vec1, vector<int> &vec2)
+{
+    if(vec1.size() != vec2.size())
+    {
+        return false;
+    };
+    for(int i = 0; i < vec1.size(); i++)
+    {
+        if(vec1[i] + 1 != vec2[i])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+/*
+    Формат тестирующей функции:
+    1. Вводится файл с графом по пути path_to_test
+    2. В path_to_expected в первой строке через пробел вводятся числа lon1, lat1, lon2, lat2 - начальная и конечная широта/долгота
+    3. По заданным широтам и долготам запускаются алгоритмы:
+       а) BFS
+       б) DFS
+       в) Дейкстры
+       г) A*
+    После сравнивается результат работы алгоритмов с ожидаемыми результатами в файле expected
+    4. Файл test имеет такой же вид, как и файл с графом дорог Санкт-Петербурга
+    5. Файл expected имеет следующий вид:
+        1 1 3 3
+        7
+        8
+        1 2 3 5 6
+    Первая строка - lon1, lat1, lon2, lat2
+    Вторая строка - результат работы BFS
+    Третья строка - результат работы DFS
+    Четвёртая строка - маршрут оптимального пути, который должны найти Дейкстра и A* 
+    Визуализация графа test будет приложена в отчёте
+*/
+void test(int number_of_test, string path_to_test, string path_to_expected)
+{
+    fstream test;
+    test.open(path_to_test);
+    fstream expected;
+    expected.open(path_to_expected);
+
+    Graph g;
+    write_graph(g, test);
+
+    double lon1, lat1, lon2, lat2;
+    expected >> lon1 >> lat1 >> lon2 >> lat2;
+
+    double dfs_expected, bfs_expected;
+    expected >> dfs_expected >> bfs_expected;
+
+    vector<int> dijkstra_expected;
+    vector<int> a_star_expected;
+    string s;
+    while(getline(expected, s))
+    {
+        read_vector(s, dijkstra_expected);
+        read_vector(s, a_star_expected);
+    }
+    
+    double dfs_dist = g.dfs(lon1, lat1, lon2, lat2);
+    double bfs_dist = g.bfs(lon1, lat1, lon2, lat2);
+    vector<int> dijkstra_way = g.dijkstra(lon1, lat1, lon2, lat2);
+    vector<int> a_star_way = g.A_star(lon1, lat1, lon2, lat2);
+
+    bool condition =
+    compare_vectors(dijkstra_way, dijkstra_expected) 
+    && compare_vectors(a_star_way, a_star_expected)
+    && bfs_dist == bfs_expected && dfs_dist == dfs_expected;
+
+    if(condition)
+    {
+        cout << "Test № " << number_of_test << " completed!";
+    }
+    else
+    {
+        cerr << "ATTENTION \n Test № " << number_of_test << " failed!";
+    }
+    cout << '\n';
+    test.close();
+    expected.close();
+}
+int main()
+{
+    setlocale(LC_ALL, "rus");
+    setlocale(LC_ALL, "C");
+    setlocale(LC_NUMERIC, "C"); // Устанавливаем локаль для чисел
+    cout << fixed << setprecision(20);
+    // укажите свой путь к тестам и ответам
+    vector<string> pathes_to_tests = {"C:\\Users\\Huawei\\Desktop\\test1.txt"};
+    vector<string> pathes_to_expected = {"C:\\Users\\Huawei\\Desktop\\ans1.txt"};
+    for(int i = 0; i < pathes_to_tests.size(); i++)
+    {
+        test(i + 1, pathes_to_tests[i], pathes_to_expected[i]);
+    }
+    cout << '\n';
+    Graph g;
+    fstream fs;
+    fs.open("C:\\Users\\Huawei\\Desktop\\spb_graph.txt");
+    write_graph(g, fs);
     fs.close();
     while (true)
     {
         string action;
+        cout << "Введите 0), чтобы выйти из приложения\n";
         cout << "Введите 1), чтобы найти ближайшую вершину\n";
-        cout << "Введите 2), чтобы найти путь с помощью dfs\n";
-        cout << "Введите 3), чтобы найти путь с помощью bfs\n";
-        cout << "Введите 4), чтобы найти путь с помощью Дейкстры\n";
-        cout << "Введите 5), чтобы найти путь с помощью A*\n";
+        cout << "Введите 2), чтобы найти путь c помощью DFS\n";
+        cout << "Введите 3), чтобы найти путь c помощью BFS\n";
+        cout << "Введите 4), чтобы найти путь c помощью Дейкстры\n";
+        cout << "Введите 5), чтобы найти путь c помощью A*\n";
         cin >> action;
-        if(action == "1")
+        clock_t start = clock();
+        double lon1, lat1;
+        double lon2, lat2;
+        if(action == "0")
+        {
+            return 0;
+        }
+        else if(action == "1")
         {
             cout << "Введите широту и долготу: ";
-            double lon, lat;
-            cin >> lon >> lat;
-            Node* closest = g.get_closest_node(lon, lat);
+            cin >> lon1 >> lat1;
+            start = clock();
+            Node* closest = g.get_closest_node(lon1, lat1);
             cout << "Итоговая широта и долгота: ";
-            cout << closest->lat << ' ' << closest->lon << '\n';
+            cout << closest->lon << ' ' << closest->lat << '\n';
         }
-        if (action == "2")
+        else if (action == "2")
         {
-            cout << "Введите широту и долготу для стартовой вершины поиска dfs: ";
-            double lon1, lat1;
+            cout << "Введите широту и долготу для стартовой вершины поиска DFS: ";
             cin >> lon1 >> lat1;
             cout << "Введите широту и долготу для конечной вершины: ";
-            double lon2, lat2;
             cin >> lon2 >> lat2;
-            cout << "Расстояние: ";
+            start = clock();
             cout << g.dfs(lon1, lat1, lon2, lat2) << endl;
         }
-        if (action == "3")
+        else if (action == "3")
         {
-            cout << "Введите широту и долготу для стартовой вершины поиска bfs: ";
-            double lon1, lat1;
+            cout << "Введите широту и долготу для стартовой вершины поиска BFS: ";
             cin >> lon1 >> lat1;
             cout << "Введите широту и долготу для конечной вершины: ";
-            double lon2, lat2;
             cin >> lon2 >> lat2;
-            cout << "Расстояние: ";
+            start = clock();
             cout << g.bfs(lon1, lat1, lon2, lat2) << endl;
         }
-        if (action == "4")
+        else if (action == "4")
         {
             cout << "Введите широту и долготу для стартовой вершины поиска Дейкстры: ";
-            double lon1, lat1;
             cin >> lon1 >> lat1;
             cout << "Введите широту и долготу для конечной вершины: ";
-            double lon2, lat2;
             cin >> lon2 >> lat2;
-            cout << "Расстояние: ";
+            start = clock();
             g.dijkstra(lon1, lat1, lon2, lat2);
             cout << endl;
         }
-        if (action == "5")
+        else if (action == "5")
         {
             cout << "Введите широту и долготу для стартовой вершины поиска A*: ";
-            double lon1, lat1;
             cin >> lon1 >> lat1;
 
             cout << "Введите широту и долготу для конечной вершины: ";
-            double lon2, lat2;
             cin >> lon2 >> lat2;
+            start = clock();
             cout << "Расстояние: ";
             g.A_star(lon1, lat1, lon2, lat2);
             cout << endl;
         }
+        else
+        {
+            continue;
+        }
+        clock_t end = clock();
+        double duration = (end - start) * 1000 / CLOCKS_PER_SEC;
+        cout << "Время выполнения алгоритма: " << duration << " милисекунд \n";
     }
-    //30.288133 59.924775
-    //30.297411 59.917276
 }
+// Вершины, которые брал в 2GIS
+// 30.322375 59.845732 30.389172 59.946746
+// Московская площадь - Смольный
+
+// 30.447794 60.044943 30.339041 59.927399
+// Мурино - Корпус ИТМО на Ломоносова
+
+// 30.322375 59.845732 30.339041 59.927399
+// Московская площадь - Корпус ИТМО на Ломоносова
+
+// 30.231974 59.94835 30.479321 59.905877
+// Улица Одоевского - Улица Дыбенко
